@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Task {
+  id        String     @id @default(uuid()) @db.Uuid
+  input     String     @db.Text
+  taskType  String     @default("general")
+  status    String     @default("pending")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  plans     TaskPlan[]
+
+  @@index([status, createdAt])
+}
+
+model TaskPlan {
+  id        String     @id @default(uuid()) @db.Uuid
+  taskId    String     @db.Uuid
+  version   Int        @default(1)
+  summary   String     @db.Text
+  status    String     @default("draft")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  task      Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  steps     TaskStep[]
+
+  @@unique([taskId, version])
+  @@index([taskId])
+}
+
+model TaskStep {
+  id          String   @id @default(uuid()) @db.Uuid
+  planId      String   @db.Uuid
+  position    Int
+  title       String
+  description String   @db.Text
+  stepType    String   @default("general")
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plan        TaskPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, position])
+  @@index([planId, status])
+}
