@@ -1,5 +1,6 @@
 
 import {
+  BadGatewayException,
   BadRequestException,
   Injectable,
   NotFoundException,
@@ -7,6 +8,7 @@ import {
 
 import { PrismaService } from './prisma/prisma.service.js';
 import { PlannerService } from './planner/planner.service.js';
+import { PlanEvaluatorService } from './planner/plan-evaluator.service.js';
 
 const ALLOWED_TASK_TYPES = [
   'website',
@@ -55,6 +57,7 @@ export class AppService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly planner: PlannerService,
+    private readonly planEvaluator: PlanEvaluatorService,
   ) {}
 
   getHello(): string {
@@ -179,18 +182,29 @@ export class AppService {
     });
   }
 
-  // Generate an AI-powered plan through Groq and save it.
+  // Generate, evaluate and save an AI-powered plan.
   async createAiPlan(taskId: string): Promise<TaskPlanRecord> {
-    // Retrieve the original user task.
+    // Step 1: Retrieve the original user task.
     const task = await this.getTask(taskId);
 
-    // Generate a structured plan using the Groq provider.
+    // Step 2: Generate a structured plan using Groq.
     const draft = await this.planner.createAiDraft(
       task.input,
       task.taskType,
     );
 
-    // Save the plan and all its steps atomically.
+    // Step 3: Evaluate the generated plan before saving.
+    const evaluation = this.planEvaluator.evaluate(draft);
+
+    // Reject invalid plans instead of saving them.
+    if (evaluation.status === 'failed') {
+      throw new BadGatewayException({
+        message: 'AI-generated plan failed evaluation.',
+        findings: evaluation.findings,
+      });
+    }
+
+    // Step 4: Save the evaluated plan and all its steps atomically.
     return this.prisma.$transaction(async (tx) => {
       const latestPlan = await tx.taskPlan.findFirst({
         where: { taskId },
@@ -237,7 +251,6 @@ export class AppService {
 
   // Retrieve the latest saved plan and all its steps.
   async getLatestPlan(taskId: string): Promise<TaskPlanRecord> {
-    // Verify that the requested task exists.
     await this.getTask(taskId);
 
     const plan = await this.prisma.taskPlan.findFirst({
